@@ -118,6 +118,7 @@ all = [
 
 [project.scripts]
 fastapi = "fastapi.cli:main"
+ozma-spec = "fastapi.openapi.spec_cli:main"
 
 [dependency-groups]
 dev = [

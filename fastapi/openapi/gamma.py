@@ -410,4 +410,12 @@ def extract_gamma(route: Any) -> GammaSpec:
             spec.requires_prior = explicit.requires_prior
             spec.forbidden_after = explicit.forbidden_after
 
+        # 3. ORM introspection: enrich state machine from return type annotation
+        if spec.states is None:
+            try:
+                from fastapi.openapi.gamma_orm import enrich_gamma_from_response_type
+                enrich_gamma_from_response_type(spec, endpoint)
+            except ImportError:
+                pass
+
     return spec
