@@ -17,7 +17,10 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
+
+from pydantic import BaseModel
+from starlette.responses import JSONResponse
 
 from fastapi.dependencies.models import Dependant
 
@@ -98,6 +101,179 @@ class GammaSpec:
         if self.forbidden_after is not None:
             d["forbidden_after"] = self.forbidden_after
         return d
+
+
+# ---------------------------------------------------------------------------
+# GammaError — returned, not raised
+# ---------------------------------------------------------------------------
+
+class GammaError(BaseModel):
+    """
+    A Γ-aware API error.
+
+    Returned from endpoint functions instead of raising HTTPException.
+    Describes WHY an operation was inadmissible — the graph state at the
+    point of failure — not merely that it failed.
+
+    FastAPI intercepts GammaError return values and serialises them to a
+    JSON response with the appropriate status code automatically.
+
+    Usage::
+
+        @app.get("/items/{id}")
+        async def get_item(id: int) -> Item | GammaError:
+            item = db.get(id)
+            if item is None:
+                return GammaError.not_found("item", id)
+            return item
+
+        @app.post("/items/{id}/publish")
+        @gamma.requires_state("draft")
+        async def publish_item(id: int) -> Item | GammaError:
+            item = db.get(id)
+            if item.status != "draft":
+                return GammaError.wrong_state(
+                    operation="publishItem",
+                    resource="item",
+                    current=item.status,
+                    required=["draft"],
+                )
+            ...
+    """
+
+    violation: str
+    """
+    Violation type. Maps to HTTP status:
+
+    - resource_not_found    → 404
+    - state_violation       → 409
+    - forbidden_after       → 409
+    - requires_prior        → 409
+    - permission_denied     → 403
+    - precondition_failed   → 412
+    - schema_violation      → 422
+    """
+
+    description: str
+    """Human-readable explanation of WHY the operation was inadmissible."""
+
+    operation: str | None = None
+    """The operationId that was attempted."""
+
+    resource: str | None = None
+    """The resource type or identifier involved."""
+
+    current_state: str | None = None
+    """The resource's current state (for state_violation)."""
+
+    required_state: list[str] | None = None
+    """States in which the operation would have been admissible."""
+
+    missing_prior: list[str] | None = None
+    """Operations that must have been called first (for requires_prior)."""
+
+    blocked_by: str | None = None
+    """Operation whose prior call made this inadmissible (for forbidden_after)."""
+
+    _STATUS_CODES: ClassVar[dict[str, int]] = {
+        "resource_not_found": 404,
+        "state_violation": 409,
+        "forbidden_after": 409,
+        "requires_prior": 409,
+        "permission_denied": 403,
+        "precondition_failed": 412,
+        "schema_violation": 422,
+    }
+
+    def status_code(self) -> int:
+        return self._STATUS_CODES.get(self.violation, 400)
+
+    def to_response(self) -> JSONResponse:
+        return JSONResponse(
+            content=self.model_dump(exclude_none=True),
+            status_code=self.status_code(),
+        )
+
+    # ------------------------------------------------------------------
+    # Named constructors — each explains the specific WHY
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def not_found(cls, resource: str, identifier: Any = None) -> "GammaError":
+        """Resource does not exist — precondition 'resource must exist' failed."""
+        id_part = f" with id {identifier!r}" if identifier is not None else ""
+        return cls(
+            violation="resource_not_found",
+            description=f"{resource}{id_part} does not exist",
+            resource=resource,
+        )
+
+    @classmethod
+    def wrong_state(
+        cls,
+        *,
+        operation: str,
+        resource: str,
+        current: str,
+        required: list[str],
+    ) -> "GammaError":
+        """Resource is in the wrong state for this operation."""
+        required_desc = " or ".join(repr(s) for s in required)
+        return cls(
+            violation="state_violation",
+            description=(
+                f"{operation!r} requires {resource} to be in state {required_desc}, "
+                f"but it is currently {current!r}"
+            ),
+            operation=operation,
+            resource=resource,
+            current_state=current,
+            required_state=required,
+        )
+
+    @classmethod
+    def requires_prior(
+        cls,
+        *,
+        operation: str,
+        missing: list[str],
+    ) -> "GammaError":
+        """Operation requires prior operations that have not been called."""
+        missing_desc = ", ".join(repr(m) for m in missing)
+        return cls(
+            violation="requires_prior",
+            description=(
+                f"{operation!r} requires {missing_desc} to have been called first"
+            ),
+            operation=operation,
+            missing_prior=missing,
+        )
+
+    @classmethod
+    def forbidden_after(
+        cls,
+        *,
+        operation: str,
+        blocked_by: str,
+    ) -> "GammaError":
+        """Operation is inadmissible after a previously-called operation."""
+        return cls(
+            violation="forbidden_after",
+            description=(
+                f"{operation!r} is not admissible after {blocked_by!r} has been called"
+            ),
+            operation=operation,
+            blocked_by=blocked_by,
+        )
+
+    @classmethod
+    def permission_denied(cls, *, operation: str, reason: str) -> "GammaError":
+        """Caller lacks permission to perform this operation."""
+        return cls(
+            violation="permission_denied",
+            description=reason,
+            operation=operation,
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -32,6 +32,7 @@ Usage::
 """
 
 from fastapi.openapi.gamma import (
+    GammaError,
     forbidden_after,
     get_state_machine,
     postcondition,
@@ -43,6 +44,7 @@ from fastapi.openapi.gamma import (
 )
 
 __all__ = [
+    "GammaError",
     "forbidden_after",
     "get_state_machine",
     "postcondition",

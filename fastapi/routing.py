@@ -58,6 +58,7 @@ from fastapi.exceptions import (
     ResponseValidationError,
     WebSocketRequestValidationError,
 )
+from fastapi.openapi.gamma import GammaError
 from fastapi.sse import (
     _PING_INTERVAL,
     KEEPALIVE_COMMENT,
@@ -676,7 +677,11 @@ def get_request_handler(
                     values=solved_result.values,
                     is_coroutine=is_coroutine,
                 )
-                if isinstance(raw_response, Response):
+                if isinstance(raw_response, GammaError):
+                    response = raw_response.to_response()
+                    response.background = solved_result.background_tasks
+                    response.headers.raw.extend(solved_result.response.headers.raw)
+                elif isinstance(raw_response, Response):
                     if raw_response.background is None:
                         raw_response.background = solved_result.background_tasks
                     response = raw_response
