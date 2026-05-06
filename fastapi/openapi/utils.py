@@ -30,6 +30,7 @@ from fastapi.params import Body, ParamTypes
 from fastapi.responses import Response
 from fastapi.sse import _SSE_EVENT_SCHEMA
 from fastapi.types import ModelNameMap
+from fastapi.openapi.gamma import extract_gamma
 from fastapi.utils import (
     deep_dict_update,
     generate_operation_id_for_path,
@@ -474,6 +475,9 @@ def get_openapi_path(
                     )
             if route.openapi_extra:
                 deep_dict_update(operation, route.openapi_extra)
+            gamma = extract_gamma(route)
+            if not gamma.is_empty():
+                operation["x-gamma"] = gamma.to_dict()
             path[method.lower()] = operation
     return path, security_schemes, definitions
 
