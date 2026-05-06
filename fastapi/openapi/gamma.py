@@ -105,9 +105,13 @@ class GammaSpec:
 
 # ---------------------------------------------------------------------------
 # GammaError — returned, not raised
+#
+# Use pydantic-gamma's definition if installed so the type is identical
+# throughout the stack (model layer → FastAPI → client). Fall back to the
+# local definition so pydantic-gamma is never a hard dependency.
 # ---------------------------------------------------------------------------
 
-class GammaError(BaseModel):
+class _LocalGammaError(BaseModel):
     """
     A Γ-aware API error.
 
@@ -216,7 +220,7 @@ class GammaError(BaseModel):
         resource: str,
         current: str,
         required: list[str],
-    ) -> "GammaError":
+    ) -> "_LocalGammaError":
         """Resource is in the wrong state for this operation."""
         required_desc = " or ".join(repr(s) for s in required)
         return cls(
@@ -237,7 +241,7 @@ class GammaError(BaseModel):
         *,
         operation: str,
         missing: list[str],
-    ) -> "GammaError":
+    ) -> "_LocalGammaError":
         """Operation requires prior operations that have not been called."""
         missing_desc = ", ".join(repr(m) for m in missing)
         return cls(
@@ -255,7 +259,7 @@ class GammaError(BaseModel):
         *,
         operation: str,
         blocked_by: str,
-    ) -> "GammaError":
+    ) -> "_LocalGammaError":
         """Operation is inadmissible after a previously-called operation."""
         return cls(
             violation="forbidden_after",
@@ -274,6 +278,12 @@ class GammaError(BaseModel):
             description=reason,
             operation=operation,
         )
+
+
+try:
+    from pydantic_gamma import GammaError
+except ImportError:
+    GammaError = _LocalGammaError  # type: ignore[misc,assignment]
 
 
 # ---------------------------------------------------------------------------
